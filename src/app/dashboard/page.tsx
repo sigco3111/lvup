@@ -10,8 +10,13 @@ import { GameStatusHeader } from '@/components/dashboard/GameStatusHeader';
 import { Card } from '@/components/ui/card';
 import Link from 'next/link';
 import { GainExperienceButton } from '@/components/character/GainExperienceButton';
+import dynamic from 'next/dynamic';
 
-export const dynamic = 'force-dynamic';
+// BattleScene을 클라이언트 컴포넌트로 동적 임포트
+const BattleScene = dynamic(
+  () => import('@/components/battle/BattleScene'),
+  { loading: () => <p className="text-center py-4">전투 시스템 로딩 중...</p> }
+);
 
 export default async function Dashboard() {
   // 현재 캐릭터 정보 조회
@@ -44,10 +49,7 @@ export default async function Dashboard() {
         {/* 전투 정보 카드 */}
         <Card className="p-4 shadow-md">
           <h2 className="text-lg font-semibold mb-3">전투 정보</h2>
-          <p className="text-sm text-gray-500">
-            자동 전투 시스템은 개발 중입니다. 곧 이용하실 수 있습니다.
-          </p>
-          {/* 여기에 추후 자동 전투 시스템 연동 */}
+          <BattleScene />
         </Card>
         
         {/* 능력치 요약 카드 */}

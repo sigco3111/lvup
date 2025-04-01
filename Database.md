@@ -380,6 +380,111 @@ ON CONFLICT (name) DO NOTHING;
                               +----------------------+       
 ```
 
+## 전투 시스템 테이블
+
+자동 전투 시스템에 필요한 테이블과 함수들입니다. Supabase SQL 편집기에서 다음 SQL을 실행하여 필요한 테이블과 기본 데이터를 생성할 수 있습니다:
+
+```sql
+-- 게임 스테이지 테이블
+CREATE TABLE IF NOT EXISTS game_stages (
+  id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+  name VARCHAR(100) NOT NULL,
+  description TEXT,
+  level_requirement INT NOT NULL DEFAULT 1,
+  stage_order INT NOT NULL,
+  world_id INT NOT NULL,
+  region_id INT NOT NULL,
+  is_boss_stage BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 게임 몬스터 테이블
+CREATE TABLE IF NOT EXISTS game_monsters (
+  id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+  name VARCHAR(100) NOT NULL,
+  description TEXT,
+  level INT NOT NULL DEFAULT 1,
+  max_hp INT NOT NULL,
+  attack INT NOT NULL,
+  defense INT NOT NULL,
+  exp INT NOT NULL,
+  gold INT NOT NULL,
+  stage_id BIGINT NOT NULL REFERENCES game_stages(id),
+  is_boss BOOLEAN NOT NULL DEFAULT FALSE,
+  drop_table_id BIGINT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 기본 스테이지 데이터 삽입
+INSERT INTO game_stages (name, description, level_requirement, stage_order, world_id, region_id, is_boss_stage) VALUES
+('초보자 마을', '모험가들이 처음 시작하는 마을입니다.', 1, 1, 1, 1, false),
+('숲의 입구', '작은 슬라임들이 서식하는 곳입니다.', 1, 2, 1, 1, false),
+('깊은 숲', '조금 더 강한 몬스터들이 있는 곳입니다.', 3, 3, 1, 1, false),
+('숲의 심장부', '숲의 보스 몬스터가 있는 곳입니다.', 5, 4, 1, 1, true);
+
+-- 기본 몬스터 데이터 삽입
+INSERT INTO game_monsters (name, description, level, max_hp, attack, defense, exp, gold, stage_id, is_boss) VALUES
+('초록 슬라임', '가장 기본적인 몬스터입니다.', 1, 50, 5, 2, 10, 5, 1, false),
+('빨간 슬라임', '조금 더 강한 슬라임입니다.', 2, 80, 8, 3, 15, 8, 2, false),
+('파란 슬라임', '마법 속성을 가진 슬라임입니다.', 3, 120, 12, 5, 20, 12, 3, false),
+('슬라임 킹', '모든 슬라임을 다스리는 왕입니다.', 5, 500, 25, 15, 100, 50, 4, true);
+
+-- 경험치 획득 함수 수정 (몬스터 처치 시 호출)
+CREATE OR REPLACE FUNCTION gain_experience(
+  p_character_id UUID,
+  p_exp_amount INT,
+  p_gold_amount INT
+) RETURNS VOID AS $$
+DECLARE
+  v_current_level INT;
+  v_current_exp INT;
+  v_required_exp INT;
+  v_new_level INT;
+  v_skill_points INT;
+BEGIN
+  -- 현재 캐릭터 정보 조회
+  SELECT level, experience INTO v_current_level, v_current_exp
+  FROM user_characters
+  WHERE id = p_character_id;
+
+  -- 경험치 추가
+  UPDATE user_characters
+  SET experience = experience + p_exp_amount,
+      gold = gold + p_gold_amount
+  WHERE id = p_character_id;
+
+  -- 레벨업 체크 및 처리
+  LOOP
+    -- 다음 레벨 필요 경험치 조회
+    SELECT required_exp INTO v_required_exp
+    FROM game_level_requirements
+    WHERE level = v_current_level;
+
+    EXIT WHEN (v_current_exp + p_exp_amount) < v_required_exp;
+
+    -- 레벨업
+    v_current_level := v_current_level + 1;
+    v_skill_points := 1; -- 레벨업 시 스킬 포인트 1 지급
+
+    UPDATE user_characters
+    SET level = v_current_level,
+        skill_points = skill_points + v_skill_points,
+        physical_attack = physical_attack + 2,
+        magical_attack = magical_attack + 2,
+        physical_defense = physical_defense + 1,
+        magical_defense = magical_defense + 1,
+        max_hp = max_hp + 10
+    WHERE id = p_character_id;
+
+    -- 남은 경험치 계산
+    v_current_exp := (v_current_exp + p_exp_amount) - v_required_exp;
+  END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+```
+
 ## 테이블 설명
 
 ### 1. game_level_requirements
@@ -408,3 +513,44 @@ ON CONFLICT (name) DO NOTHING;
 - 직업 기반 초기 스탯 설정
 - 사용자 ID 연결
 - 생성된 캐릭터 ID 반환
+
+### 전투 시스템 테이블 설명
+
+#### 1. game_stages
+게임 내 스테이지 정보를 저장합니다. 각 스테이지는 월드와 지역에 소속되며, 레벨 요구사항과 보스 스테이지 여부를 정의합니다.
+
+- `id`: 스테이지 식별자
+- `name`: 스테이지 이름
+- `description`: 스테이지 설명
+- `level_requirement`: 입장에 필요한 최소 레벨
+- `stage_order`: 스테이지 순서
+- `world_id`: 소속 월드 ID
+- `region_id`: 소속 지역 ID
+- `is_boss_stage`: 보스 스테이지 여부
+
+#### 2. game_monsters
+게임 내 몬스터 정보를 저장합니다. 각 몬스터는 특정 스테이지에 소속되며, 레벨, HP, 공격력, 방어력, 경험치, 골드 등의 기본 속성을 갖습니다.
+
+- `id`: 몬스터 식별자
+- `name`: 몬스터 이름
+- `description`: 몬스터 설명
+- `level`: 몬스터 레벨
+- `max_hp`: 최대 체력
+- `attack`: 공격력
+- `defense`: 방어력
+- `exp`: 처치 시 획득 경험치
+- `gold`: 처치 시 획득 골드
+- `stage_id`: 소속 스테이지 ID
+- `is_boss`: 보스 몬스터 여부
+- `drop_table_id`: 아이템 드랍 테이블 참조 (향후 확장)
+
+### 전투 시스템 함수 설명
+
+#### 1. gain_experience
+몬스터 처치 후 캐릭터의 경험치와 골드를 증가시키는 함수입니다. 다음 기능을 수행합니다:
+
+- 캐릭터의 현재 레벨과 경험치 조회
+- 경험치와 골드 증가 처리
+- 레벨업 조건 충족 시 레벨 증가 및 스탯 상승
+- 스킬 포인트 부여
+- 여러 레벨 동시 상승 처리 (루프 사용)
