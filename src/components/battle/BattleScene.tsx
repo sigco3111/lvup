@@ -1,8 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Progress } from '@/components/ui/progress';
 import { createClient } from '@/utils/supabase/client';
+import { v4 as uuidv4 } from 'uuid';
+import { recordLoot, LootData } from '@/actions/game';
+import { LogItem } from '@/components/dashboard/BattleLog';
 
 // 전투 관련 타입 정의
 interface Monster {
@@ -15,6 +18,7 @@ interface Monster {
   defense: number;
   exp: number;
   gold: number;
+  itemDropChance?: number; // 아이템 드롭 확률
 }
 
 interface Character {
@@ -35,11 +39,16 @@ interface BattleState {
   lastDamageReceived: number | null;
 }
 
+interface BattleSceneProps {
+  onLogUpdate?: (newLog: LogItem) => void; // 로그 업데이트 콜백
+  onGoldChange?: (newGold: number) => void; // 골드 변경 콜백
+}
+
 /**
  * 전투 장면을 표시하는 컴포넌트
  * 자동 전투 로직과 시각적 표현을 담당
  */
-export default function BattleScene() {
+export default function BattleScene({ onLogUpdate, onGoldChange }: BattleSceneProps) {
   const supabase = createClient();
   const [character, setCharacter] = useState<Character | null>(null);
   const [battleState, setBattleState] = useState<BattleState>({
@@ -49,6 +58,7 @@ export default function BattleScene() {
     lastDamageReceived: null,
   });
   const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [gameData, setGameData] = useState<{ gold: number }>({ gold: 0 });
 
   // 캐릭터 정보 로드
   useEffect(() => {
@@ -57,6 +67,7 @@ export default function BattleScene() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
+        // 캐릭터 정보 로드
         const { data: characterData, error } = await supabase
           .from('user_characters')
           .select('*')
@@ -64,6 +75,21 @@ export default function BattleScene() {
           .single();
 
         if (error) throw error;
+
+        // 게임 데이터(골드 등) 로드
+        const { data: gameData, error: gameDataError } = await supabase
+          .from('user_game_data')
+          .select('gold')
+          .eq('user_id', user.id)
+          .single();
+          
+        if (gameDataError) {
+          console.error('게임 데이터 로드 실패:', gameDataError);
+        } else if (gameData) {
+          setGameData({ gold: gameData.gold || 0 });
+          // 부모 컴포넌트에 골드 정보 전달
+          if (onGoldChange) onGoldChange(gameData.gold || 0);
+        }
 
         if (characterData) {
           // 수정: 모든 숫자 데이터에 Number() 적용하여 타입 보장
@@ -87,7 +113,7 @@ export default function BattleScene() {
     }
 
     loadCharacterData();
-  }, []);
+  }, [onGoldChange]);
 
   // 몬스터 생성 함수
   const spawnMonster = async () => {
@@ -145,6 +171,7 @@ export default function BattleScene() {
           defense: Number(selectedMonster.defense),
           exp: Number(selectedMonster.exp),
           gold: Number(selectedMonster.gold),
+          itemDropChance: Number(selectedMonster.item_drop_chance || 0.05), // 기본 5%
         },
       }));
     } catch (error) {
@@ -218,17 +245,49 @@ export default function BattleScene() {
     }
   };
 
+  // 아이템 획득 여부 확인 (확률 기반)
+  const checkItemDrop = useCallback((dropChance: number = 0.05) => {
+    // 예시 아이템 ID 배열 (실제로는 DB에서 가져와야 함)
+    const itemPool = [
+      { id: 'item_1', rarity: 'common' }, // 일반 아이템
+      { id: 'item_2', rarity: 'uncommon' }, // 고급 아이템
+      { id: 'item_3', rarity: 'rare' }, // 희귀 아이템
+    ];
+    
+    // 아이템 드롭 확률 계산
+    const rolled = Math.random();
+    if (rolled <= dropChance) {
+      // 아이템 드롭 성공
+      const rarityRoll = Math.random();
+      let selectedItem;
+      
+      // 등급별 확률 - 일반(70%), 고급(25%), 희귀(5%)
+      if (rarityRoll < 0.7) {
+        selectedItem = itemPool.find(item => item.rarity === 'common');
+      } else if (rarityRoll < 0.95) {
+        selectedItem = itemPool.find(item => item.rarity === 'uncommon');
+      } else {
+        selectedItem = itemPool.find(item => item.rarity === 'rare');
+      }
+      
+      return selectedItem || itemPool[0];
+    }
+    
+    return null;
+  }, []);
+
   // 몬스터 처치 처리
   const handleMonsterDefeat = async () => {
     if (!character || !battleState.currentMonster) return;
 
     try {
-      // 처치된 몬스터 정보 임시 저장 (디버깅용)
+      // 처치된 몬스터 정보 임시 저장
       const defeatedMonster = {
         id: battleState.currentMonster.id,
         name: battleState.currentMonster.name,
         exp: battleState.currentMonster.exp,
-        gold: battleState.currentMonster.gold
+        gold: battleState.currentMonster.gold,
+        itemDropChance: battleState.currentMonster.itemDropChance || 0.05
       };
       
       console.log('몬스터 처치:', defeatedMonster);
@@ -240,16 +299,61 @@ export default function BattleScene() {
         currentMonster: null
       }));
 
-      // 경험치와 골드 획득 처리
-      const { error } = await supabase.rpc('gain_experience', {
-        p_character_id: character.id,
-        p_exp_amount: Number(defeatedMonster.exp),
-        p_gold_amount: Number(defeatedMonster.gold),
-      });
+      // 아이템 획득 확인
+      const droppedItem = checkItemDrop(defeatedMonster.itemDropChance);
+      
+      // 로그 아이템 생성
+      if (onLogUpdate) {
+        // 골드 획득 로그
+        onLogUpdate({
+          id: uuidv4(),
+          type: 'gold',
+          message: `+${defeatedMonster.gold} 골드`,
+          value: defeatedMonster.gold,
+          timestamp: Date.now()
+        });
+        
+        // 경험치 획득 로그
+        onLogUpdate({
+          id: uuidv4(),
+          type: 'exp',
+          message: `+${defeatedMonster.exp} 경험치`,
+          value: defeatedMonster.exp,
+          timestamp: Date.now()
+        });
+        
+        // 아이템 획득 로그 (있는 경우)
+        if (droppedItem) {
+          onLogUpdate({
+            id: uuidv4(),
+            type: 'item',
+            message: `획득: ${droppedItem.id.replace('_', ' ').replace(/^\w/, c => c.toUpperCase())}`,
+            itemRarity: droppedItem.rarity as any,
+            timestamp: Date.now()
+          });
+        }
+      }
+      
+      // 골드 업데이트 반영
+      const newGold = gameData.gold + defeatedMonster.gold;
+      setGameData(prev => ({ ...prev, gold: newGold }));
+      
+      // 부모 컴포넌트에 골드 변경 알림
+      if (onGoldChange) {
+        onGoldChange(newGold);
+      }
 
-      if (error) {
-        console.error('보상 획득 실패:', error);
-        throw error;
+      // 재화/아이템 획득 처리 (Server Action)
+      const lootData: LootData = {
+        gold: defeatedMonster.gold,
+        exp: defeatedMonster.exp,
+        items: droppedItem ? [{ itemId: droppedItem.id }] : undefined
+      };
+      
+      // Server Action 호출
+      const result = await recordLoot(lootData);
+      if (!result.success) {
+        console.error('재화/아이템 획득 처리 실패:', result.message);
       }
 
       // 새로운 몬스터 생성 (약간의 지연 추가로 상태 업데이트 보장)

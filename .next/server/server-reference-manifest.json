@@ -3,7 +3,7 @@
     "40313a4ac79fa18e9c6a9ef6eb779c8bc4a29d3ed2": {
       "workers": {
         "app/dashboard/page": {
-          "moduleId": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2FUsers%2Fhjshin%2FDesktop%2Fproject%2Fwork%2Fai-driven-dev%2Flvup%2Fsrc%2Factions%2Fcharacter%2Findex.ts%22%2C%5B%7B%22id%22%3A%2240313a4ac79fa18e9c6a9ef6eb779c8bc4a29d3ed2%22%2C%22exportedName%22%3A%22gainExperienceAction%22%7D%2C%7B%22id%22%3A%2240f675f054556f2a4ee3dbe2ff43c246dcf6aebbaf%22%2C%22exportedName%22%3A%22createCharacterAction%22%7D%5D%5D%5D&__client_imported__=true!",
+          "moduleId": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2FUsers%2Fhjshin%2FDesktop%2Fproject%2Fwork%2Fai-driven-dev%2Flvup%2Fsrc%2Factions%2Fgame.ts%22%2C%5B%7B%22id%22%3A%2240cf1d66e19e740d14d332ab7d9340dd4fdf9beba1%22%2C%22exportedName%22%3A%22recordLoot%22%7D%5D%5D%2C%5B%22%2FUsers%2Fhjshin%2FDesktop%2Fproject%2Fwork%2Fai-driven-dev%2Flvup%2Fsrc%2Factions%2Fcharacter%2Findex.ts%22%2C%5B%7B%22id%22%3A%2240313a4ac79fa18e9c6a9ef6eb779c8bc4a29d3ed2%22%2C%22exportedName%22%3A%22gainExperienceAction%22%7D%2C%7B%22id%22%3A%2240f675f054556f2a4ee3dbe2ff43c246dcf6aebbaf%22%2C%22exportedName%22%3A%22createCharacterAction%22%7D%5D%5D%5D&__client_imported__=true!",
           "async": false
         },
         "app/character/page": {
@@ -19,7 +19,7 @@
     "40f675f054556f2a4ee3dbe2ff43c246dcf6aebbaf": {
       "workers": {
         "app/dashboard/page": {
-          "moduleId": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2FUsers%2Fhjshin%2FDesktop%2Fproject%2Fwork%2Fai-driven-dev%2Flvup%2Fsrc%2Factions%2Fcharacter%2Findex.ts%22%2C%5B%7B%22id%22%3A%2240313a4ac79fa18e9c6a9ef6eb779c8bc4a29d3ed2%22%2C%22exportedName%22%3A%22gainExperienceAction%22%7D%2C%7B%22id%22%3A%2240f675f054556f2a4ee3dbe2ff43c246dcf6aebbaf%22%2C%22exportedName%22%3A%22createCharacterAction%22%7D%5D%5D%5D&__client_imported__=true!",
+          "moduleId": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2FUsers%2Fhjshin%2FDesktop%2Fproject%2Fwork%2Fai-driven-dev%2Flvup%2Fsrc%2Factions%2Fgame.ts%22%2C%5B%7B%22id%22%3A%2240cf1d66e19e740d14d332ab7d9340dd4fdf9beba1%22%2C%22exportedName%22%3A%22recordLoot%22%7D%5D%5D%2C%5B%22%2FUsers%2Fhjshin%2FDesktop%2Fproject%2Fwork%2Fai-driven-dev%2Flvup%2Fsrc%2Factions%2Fcharacter%2Findex.ts%22%2C%5B%7B%22id%22%3A%2240313a4ac79fa18e9c6a9ef6eb779c8bc4a29d3ed2%22%2C%22exportedName%22%3A%22gainExperienceAction%22%7D%2C%7B%22id%22%3A%2240f675f054556f2a4ee3dbe2ff43c246dcf6aebbaf%22%2C%22exportedName%22%3A%22createCharacterAction%22%7D%5D%5D%5D&__client_imported__=true!",
           "async": false
         },
         "app/character/page": {
@@ -30,6 +30,17 @@
       "layer": {
         "app/dashboard/page": "action-browser",
         "app/character/page": "action-browser"
+      }
+    },
+    "40cf1d66e19e740d14d332ab7d9340dd4fdf9beba1": {
+      "workers": {
+        "app/dashboard/page": {
+          "moduleId": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2FUsers%2Fhjshin%2FDesktop%2Fproject%2Fwork%2Fai-driven-dev%2Flvup%2Fsrc%2Factions%2Fgame.ts%22%2C%5B%7B%22id%22%3A%2240cf1d66e19e740d14d332ab7d9340dd4fdf9beba1%22%2C%22exportedName%22%3A%22recordLoot%22%7D%5D%5D%2C%5B%22%2FUsers%2Fhjshin%2FDesktop%2Fproject%2Fwork%2Fai-driven-dev%2Flvup%2Fsrc%2Factions%2Fcharacter%2Findex.ts%22%2C%5B%7B%22id%22%3A%2240313a4ac79fa18e9c6a9ef6eb779c8bc4a29d3ed2%22%2C%22exportedName%22%3A%22gainExperienceAction%22%7D%2C%7B%22id%22%3A%2240f675f054556f2a4ee3dbe2ff43c246dcf6aebbaf%22%2C%22exportedName%22%3A%22createCharacterAction%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        }
+      },
+      "layer": {
+        "app/dashboard/page": "action-browser"
       }
     }
   },
