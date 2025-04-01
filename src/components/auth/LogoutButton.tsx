@@ -19,13 +19,20 @@ export default function LogoutButton() {
       const supabase = createClient();
       
       // 로그아웃 실행
-      await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut();
       
-      // 홈 페이지로 이동
-      router.push('/');
+      if (error) {
+        console.error('로그아웃 오류:', error.message);
+        return;
+      }
+      
+      // 라우터 캐시 갱신 및 홈 페이지로 이동
       router.refresh();
+      
+      // 브라우저 전체 새로고침으로 강제 상태 초기화
+      window.location.href = '/';
     } catch (error) {
-      console.error('Logout error:', error);
+      console.error('로그아웃 오류:', error);
     } finally {
       setIsLoading(false);
     }
@@ -41,4 +48,4 @@ export default function LogoutButton() {
       {isLoading ? '로그아웃 중...' : '로그아웃'}
     </Button>
   );
-} 
+}

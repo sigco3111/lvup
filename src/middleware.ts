@@ -9,11 +9,16 @@ import type { NextRequest } from 'next/server'
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next()
   
-  // Supabase 클라이언트 생성
-  const supabase = createMiddlewareClient({ req, res })
-  
-  // 세션 새로고침
-  await supabase.auth.getSession()
+  try {
+    // Supabase 미들웨어 클라이언트 생성
+    // Next.js 15에서는 req/res 방식만 사용하도록 cookies 객체를 전달하지 않음
+    const supabase = createMiddlewareClient({ req, res })
+    
+    // 세션 새로고침
+    await supabase.auth.getSession()
+  } catch (e) {
+    console.error('Middleware error:', e)
+  }
   
   return res
 }

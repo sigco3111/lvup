@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google'
 import './globals.css'
 import Header from '@/components/layout/Header'
 import Footer from '@/components/layout/Footer'
+import { NotificationProvider, NotificationStyles } from '@/components/common/Notifications'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -19,13 +20,16 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <body className={inter.className} suppressHydrationWarning>
-        <Header />
-        <div className="min-h-screen pt-16 flex flex-col">
-          <main className="flex-1">
-            {children}
-          </main>
-          <Footer />
-        </div>
+        <NotificationProvider>
+          <Header />
+          <div className="min-h-screen pt-16 flex flex-col">
+            <main className="flex-1">
+              {children}
+            </main>
+            <Footer />
+          </div>
+          <NotificationStyles />
+        </NotificationProvider>
       </body>
     </html>
   )

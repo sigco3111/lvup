@@ -10,7 +10,7 @@ import { createClient } from '@/utils/supabase/server'
  */
 export default async function Home() {
   // 서버 컴포넌트에서 세션 확인
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
   
   return (
