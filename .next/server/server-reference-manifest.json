@@ -1,0 +1,17 @@
+{
+  "node": {
+    "00da1fc3e789fda01d59644f2115cd3e794c346ba4": {
+      "workers": {
+        "app/dashboard/page": {
+          "moduleId": "(rsc)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2FUsers%2Fhjshin%2FDesktop%2Fproject%2Fwork%2Fai-driven-dev%2Flvup%2Fsrc%2Factions%2Fuser.ts%22%2C%5B%7B%22id%22%3A%2200da1fc3e789fda01d59644f2115cd3e794c346ba4%22%2C%22exportedName%22%3A%22ensureUserProfile%22%7D%5D%5D%5D&__client_imported__=!",
+          "async": false
+        }
+      },
+      "layer": {
+        "app/dashboard/page": "rsc"
+      }
+    }
+  },
+  "edge": {},
+  "encryptionKey": "RiAJavf1/awulMJpd2EA30Lpvx8HnKC9WafntC7qt0Y="
+}
