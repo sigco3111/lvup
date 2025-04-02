@@ -101,11 +101,130 @@ CREATE POLICY "사용자는 자신의 캐릭터만 조회 가능"
 CREATE POLICY "사용자는 자신의 캐릭터만 수정 가능" 
   ON public.user_characters FOR UPDATE
   USING (auth.uid() = user_id);
+
+-- 스테이지 시스템 관련 테이블 생성
+
+-- 게임 월드 테이블
+CREATE TABLE IF NOT EXISTS game_worlds (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  sequence INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 게임 지역 테이블
+CREATE TABLE IF NOT EXISTS game_regions (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  world_id TEXT NOT NULL REFERENCES game_worlds(id),
+  sequence INTEGER NOT NULL DEFAULT 0,
+  unlock_condition_stage_id BIGINT, -- 스테이지 클리어 조건
+  related_adventure_zone_id TEXT, -- 관련된 모험 지역 ID
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 게임 스테이지 테이블
+CREATE TABLE IF NOT EXISTS game_stages (
+  id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+  name VARCHAR(100) NOT NULL,
+  description TEXT,
+  level_requirement INT NOT NULL DEFAULT 1,
+  stage_order INT NOT NULL,
+  region_id INTEGER NOT NULL,
+  world_id INTEGER NOT NULL,
+  is_boss_stage BOOLEAN NOT NULL DEFAULT FALSE,
+  normal_monsters JSONB DEFAULT '[]'::jsonb,
+  required_monster_count INTEGER DEFAULT 10,
+  background_url TEXT,
+  next_stage_id BIGINT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 사용자가 클리어한 스테이지 테이블
+CREATE TABLE IF NOT EXISTS user_cleared_stages (
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  stage_id BIGINT NOT NULL REFERENCES game_stages(id),
+  cleared_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  PRIMARY KEY (user_id, stage_id)
+);
+
+-- 사용자가 해금한 모험 지역 테이블
+CREATE TABLE IF NOT EXISTS user_unlocked_adventure_zones (
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  adventure_zone_id TEXT NOT NULL,
+  unlocked_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  PRIMARY KEY (user_id, adventure_zone_id)
+);
+
+-- user_game_data 테이블
+CREATE TABLE IF NOT EXISTS user_game_data (
+  user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  gold INTEGER NOT NULL DEFAULT 0,
+  current_stage_id BIGINT REFERENCES game_stages(id),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 외래 키 관계 설정
+ALTER TABLE game_regions
+ADD CONSTRAINT fk_regions_stage_id
+FOREIGN KEY (unlock_condition_stage_id) 
+REFERENCES game_stages(id);
+
+ALTER TABLE game_stages
+ADD CONSTRAINT fk_stages_next_stage_id
+FOREIGN KEY (next_stage_id) 
+REFERENCES game_stages(id);
+
+-- 인덱스 생성
+CREATE INDEX IF NOT EXISTS idx_game_stages_region_id ON game_stages(region_id);
+CREATE INDEX IF NOT EXISTS idx_game_stages_world_id ON game_stages(world_id);
+CREATE INDEX IF NOT EXISTS idx_game_regions_world_id ON game_regions(world_id);
+CREATE INDEX IF NOT EXISTS idx_user_cleared_stages_user_id ON user_cleared_stages(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_unlocked_adventure_zones_user_id ON user_unlocked_adventure_zones(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_game_data_current_stage_id ON user_game_data(current_stage_id);
 ```
 
 ## 데이터베이스 함수
 
 ```sql
+-- 사용자 자원(골드, 경험치) 업데이트 함수
+-- 전투 보상, 퀘스트 보상 등에서 사용
+CREATE OR REPLACE FUNCTION public.update_user_resources(
+  p_user_id UUID,
+  p_gold_delta INT,
+  p_exp_delta INT
+) RETURNS VOID AS $$
+BEGIN
+  -- 사용자 게임 데이터 업데이트
+  UPDATE user_game_data
+  SET 
+    gold = gold + p_gold_delta,
+    updated_at = NOW()
+  WHERE user_id = p_user_id;
+  
+  -- 게임 데이터가 없는 경우 새로 생성
+  IF NOT FOUND THEN
+    INSERT INTO user_game_data (user_id, gold)
+    VALUES (p_user_id, p_gold_delta);
+  END IF;
+  
+  -- 경험치가 있는 경우 캐릭터 경험치 업데이트
+  IF p_exp_delta > 0 THEN
+    UPDATE user_characters
+    SET 
+      experience = experience + p_exp_delta,
+      updated_at = NOW()
+    WHERE user_id = p_user_id;
+  END IF;
+END;
+$$ LANGUAGE plpgsql;
+
 -- 레벨업/경험치 처리 함수
 CREATE OR REPLACE FUNCTION process_experience_gain(
   p_user_id UUID,
@@ -299,258 +418,89 @@ END;
 $$ LANGUAGE plpgsql;
 ```
 
-## 초기 데이터
+## 스테이지 시스템 테이블 설명
 
-```sql
--- 초기 레벨 요구 경험치 데이터 입력
-INSERT INTO public.game_level_requirements (level, required_exp)
-VALUES
-  (1, 100),
-  (2, 200),
-  (3, 300),
-  (4, 400),
-  (5, 500),
-  (6, 600),
-  (7, 700),
-  (8, 800),
-  (9, 900),
-  (10, 1000),
-  (11, 1200),
-  (12, 1400),
-  (13, 1600),
-  (14, 1800),
-  (15, 2000),
-  (16, 2300),
-  (17, 2600),
-  (18, 2900),
-  (19, 3200),
-  (20, 3500)
-ON CONFLICT (level) DO NOTHING;
+### 게임 월드 (game_worlds)
+- **id**: TEXT 타입의 월드 고유 식별자 (예: 'beginners', 'midlands')
+- **name**: 월드 이름 (예: '초심자의 대륙')
+- **description**: 월드 설명
+- **sequence**: 월드 표시 순서
 
--- 초기 직업 데이터 입력
-INSERT INTO public.game_jobs (name, description, tier, parent_job_id, required_level, stats_per_level, base_stats)
-VALUES
-  -- 기본 직업 (Tier 1)
-  ('전사', '근접 물리 공격에 특화된 직업', 1, NULL, 1, 
-   '{"strength": 3, "dexterity": 1, "intelligence": 0, "vitality": 2}'::JSONB,
-   '{"strength": 12, "dexterity": 8, "intelligence": 5, "vitality": 15, "hp": 150, "mp": 30}'::JSONB),
-   
-  ('마법사', '원거리 마법 공격에 특화된 직업', 1, NULL, 1, 
-   '{"strength": 0, "dexterity": 1, "intelligence": 3, "vitality": 1}'::JSONB,
-   '{"strength": 5, "dexterity": 8, "intelligence": 15, "vitality": 7, "hp": 80, "mp": 100}'::JSONB),
-   
-  ('궁수', '원거리 물리 공격에 특화된 직업', 1, NULL, 1, 
-   '{"strength": 1, "dexterity": 3, "intelligence": 1, "vitality": 1}'::JSONB,
-   '{"strength": 8, "dexterity": 15, "intelligence": 8, "vitality": 9, "hp": 100, "mp": 50}'::JSONB),
-   
-  ('도적', '빠른 공격속도와 회피에 특화된 직업', 1, NULL, 1, 
-   '{"strength": 1, "dexterity": 3, "intelligence": 1, "vitality": 1}'::JSONB,
-   '{"strength": 10, "dexterity": 13, "intelligence": 7, "vitality": 10, "hp": 110, "mp": 40}'::JSONB)
-ON CONFLICT (name) DO NOTHING;
-```
+### 게임 지역 (game_regions)
+- **id**: TEXT 타입의 지역 고유 식별자 (예: 'forest', 'cave')
+- **name**: 지역 이름 (예: '고블린 숲', '박쥐 동굴')
+- **world_id**: 소속된 월드의 ID (외래 키)
+- **sequence**: 지역 표시 순서
+- **unlock_condition_stage_id**: 이 지역을 해금하기 위해 클리어해야 하는 스테이지 ID
+- **related_adventure_zone_id**: 이 지역과 연관된 모험 지역 ID
 
-## ERD(Entity-Relationship Diagram)
+### 게임 스테이지 (game_stages)
+- **id**: BIGINT 타입으로, IDENTITY 컬럼(GENERATED ALWAYS AS IDENTITY)
+- **name**: 스테이지 이름 (예: '고블린 숲 입구')
+- **description**: 스테이지 설명
+- **level_requirement**: 스테이지 진입에 필요한 최소 레벨
+- **stage_order**: 각 지역 내에서의 스테이지 순서
+- **region_id**: 스테이지가 속한 지역 ID
+- **world_id**: 스테이지가 속한 월드 ID
+- **is_boss_stage**: 보스 스테이지 여부 (TRUE/FALSE)
+- **normal_monsters**: JSONB 타입으로, 스테이지에 등장하는 일반 몬스터 목록
+- **required_monster_count**: 다음 스테이지로 넘어가기 위해 처치해야 하는 몬스터 수
+- **background_url**: 스테이지 배경 이미지 URL
+- **next_stage_id**: 이 스테이지 클리어 후 다음 스테이지 ID
 
-```
-+----------------------+       +----------------------+       +----------------------+
-|  game_jobs           |       |  user_characters     |       |  game_level_req.     |
-+----------------------+       +----------------------+       +----------------------+
-| id (PK)              |       | id (PK)              |       | level (PK)           |
-| name                 |       | user_id (FK)         |       | required_exp         |
-| description          |       | job_id (FK)          |       | stat_increase        |
-| tier                 |       | level                |       +----------------------+
-| parent_job_id (FK)   |<---+  | experience           |       
-| required_level       |    |  | strength             |       
-| stats_per_level      |    |  | dexterity            |       
-| base_stats           |    |  | intelligence         |       
-+----------------------+    |  | vitality             |       
-       ^                    |  | max_hp               |       
-       |                    |  | max_mp               |       
-       +--------------------+  | current_hp           |       
-                              | current_mp            |       
-                              | physical_attack       |       
-                              | magical_attack        |       
-                              | physical_defense      |       
-                              | magical_defense       |       
-                              | critical_rate         |       
-                              | critical_damage       |       
-                              | skill_points          |       
-                              | created_at            |       
-                              | updated_at            |       
-                              +----------------------+       
-```
+### 사용자 클리어 스테이지 (user_cleared_stages)
+- **user_id**: 사용자 ID (외래 키)
+- **stage_id**: 클리어한 스테이지 ID (외래 키)
+- **cleared_at**: 클리어 시간
 
-## 전투 시스템 테이블
+### 사용자 해금 모험 지역 (user_unlocked_adventure_zones)
+- **user_id**: 사용자 ID (외래 키)
+- **adventure_zone_id**: 해금된 모험 지역 ID
+- **unlocked_at**: 해금 시간
 
-자동 전투 시스템에 필요한 테이블과 함수들입니다. Supabase SQL 편집기에서 다음 SQL을 실행하여 필요한 테이블과 기본 데이터를 생성할 수 있습니다:
+### 사용자 게임 데이터 (user_game_data)
+- **user_id**: 사용자 ID (외래 키)
+- **gold**: 보유 골드량
+- **current_stage_id**: 현재 진행 중인 스테이지 ID (외래 키)
 
-```sql
--- 게임 스테이지 테이블
-CREATE TABLE IF NOT EXISTS game_stages (
-  id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-  name VARCHAR(100) NOT NULL,
-  description TEXT,
-  level_requirement INT NOT NULL DEFAULT 1,
-  stage_order INT NOT NULL,
-  world_id INT NOT NULL,
-  region_id INT NOT NULL,
-  is_boss_stage BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- 게임 몬스터 테이블
-CREATE TABLE IF NOT EXISTS game_monsters (
-  id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-  name VARCHAR(100) NOT NULL,
-  description TEXT,
-  level INT NOT NULL DEFAULT 1,
-  max_hp INT NOT NULL,
-  attack INT NOT NULL,
-  defense INT NOT NULL,
-  exp INT NOT NULL,
-  gold INT NOT NULL,
-  stage_id BIGINT NOT NULL REFERENCES game_stages(id),
-  is_boss BOOLEAN NOT NULL DEFAULT FALSE,
-  drop_table_id BIGINT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- 기본 스테이지 데이터 삽입
-INSERT INTO game_stages (name, description, level_requirement, stage_order, world_id, region_id, is_boss_stage) VALUES
-('초보자 마을', '모험가들이 처음 시작하는 마을입니다.', 1, 1, 1, 1, false),
-('숲의 입구', '작은 슬라임들이 서식하는 곳입니다.', 1, 2, 1, 1, false),
-('깊은 숲', '조금 더 강한 몬스터들이 있는 곳입니다.', 3, 3, 1, 1, false),
-('숲의 심장부', '숲의 보스 몬스터가 있는 곳입니다.', 5, 4, 1, 1, true);
-
--- 기본 몬스터 데이터 삽입
-INSERT INTO game_monsters (name, description, level, max_hp, attack, defense, exp, gold, stage_id, is_boss) VALUES
-('초록 슬라임', '가장 기본적인 몬스터입니다.', 1, 50, 5, 2, 10, 5, 1, false),
-('빨간 슬라임', '조금 더 강한 슬라임입니다.', 2, 80, 8, 3, 15, 8, 2, false),
-('파란 슬라임', '마법 속성을 가진 슬라임입니다.', 3, 120, 12, 5, 20, 12, 3, false),
-('슬라임 킹', '모든 슬라임을 다스리는 왕입니다.', 5, 500, 25, 15, 100, 50, 4, true);
-
--- 경험치 획득 함수 수정 (몬스터 처치 시 호출)
-CREATE OR REPLACE FUNCTION gain_experience(
-  p_character_id UUID,
-  p_exp_amount INT,
-  p_gold_amount INT
-) RETURNS VOID AS $$
-DECLARE
-  v_current_level INT;
-  v_current_exp INT;
-  v_required_exp INT;
-  v_new_level INT;
-  v_skill_points INT;
-BEGIN
-  -- 현재 캐릭터 정보 조회
-  SELECT level, experience INTO v_current_level, v_current_exp
-  FROM user_characters
-  WHERE id = p_character_id;
-
-  -- 경험치 추가
-  UPDATE user_characters
-  SET experience = experience + p_exp_amount,
-      gold = gold + p_gold_amount
-  WHERE id = p_character_id;
-
-  -- 레벨업 체크 및 처리
-  LOOP
-    -- 다음 레벨 필요 경험치 조회
-    SELECT required_exp INTO v_required_exp
-    FROM game_level_requirements
-    WHERE level = v_current_level;
-
-    EXIT WHEN (v_current_exp + p_exp_amount) < v_required_exp;
-
-    -- 레벨업
-    v_current_level := v_current_level + 1;
-    v_skill_points := 1; -- 레벨업 시 스킬 포인트 1 지급
-
-    UPDATE user_characters
-    SET level = v_current_level,
-        skill_points = skill_points + v_skill_points,
-        physical_attack = physical_attack + 2,
-        magical_attack = magical_attack + 2,
-        physical_defense = physical_defense + 1,
-        magical_defense = magical_defense + 1,
-        max_hp = max_hp + 10
-    WHERE id = p_character_id;
-
-    -- 남은 경험치 계산
-    v_current_exp := (v_current_exp + p_exp_amount) - v_required_exp;
-  END LOOP;
-END;
-$$ LANGUAGE plpgsql;
-```
-
-## 테이블 설명
-
-### 1. game_level_requirements
-레벨별 요구 경험치와 스탯 증가량을 정의합니다.
-
-### 2. game_jobs
-게임의 직업 정보를 저장합니다. 기본 직업(Tier 1)부터 전직 직업(Tier 2, 3, 4)까지 정의 가능합니다.
-
-### 3. user_characters
-사용자의 캐릭터 정보를 저장합니다. 각 사용자는 하나의 캐릭터만 가질 수 있습니다.
+## 인덱스 및 외래키 관계
+- 스테이지 ID, 지역 ID, 월드 ID에 대한 인덱스 생성으로 검색 성능 최적화
+- game_regions.unlock_condition_stage_id → game_stages.id
+- game_stages.next_stage_id → game_stages.id
+- user_game_data.current_stage_id → game_stages.id
 
 ## 데이터베이스 함수 설명
 
-### 1. process_experience_gain
-경험치 획득과 레벨업 처리를 담당하는 함수입니다. 다음 기능을 수행합니다:
-- 현재 캐릭터와 직업 정보 조회
-- 경험치 누적 계산
-- 레벨업 체크 및 여러 레벨 동시 상승 처리
-- 스탯 자동 증가 (기본 + 직업별)
-- 스킬 포인트 부여
-- 결과 반환 (레벨업 여부, 현재 스탯 등)
+### 1. update_user_resources
+사용자의 골드와 경험치를 업데이트하는 함수입니다.
+- **매개변수**:
+  - `p_user_id`: 사용자 ID
+  - `p_gold_delta`: 추가/차감할 골드 양 (양수: 증가, 음수: 감소)
+  - `p_exp_delta`: 추가/차감할 경험치 양 (양수: 증가, 음수: 감소)
+- **동작**:
+  - 사용자 게임 데이터의 골드 업데이트
+  - 데이터가 없는 경우 새로운 데이터 생성
+  - 경험치가 있는 경우 캐릭터 경험치 업데이트
 
-### 2. create_new_character
-새 캐릭터를 생성하는 함수입니다. 다음 기능을 수행합니다:
-- 직업 정보 조회
-- 직업 기반 초기 스탯 설정
-- 사용자 ID 연결
-- 생성된 캐릭터 ID 반환
+### 2. process_experience_gain
+경험치 획득과 레벨업 처리를 담당하는 함수입니다.
+- **매개변수**:
+  - `p_user_id`: 사용자 ID
+  - `p_exp_gain`: 획득한 경험치
+- **동작**:
+  - 현재 캐릭터와 직업 정보 조회
+  - 경험치 누적 계산
+  - 레벨업 체크 및 여러 레벨 동시 상승 처리
+  - 스탯 자동 증가 (기본 + 직업별)
+  - 스킬 포인트 부여
 
-### 전투 시스템 테이블 설명
-
-#### 1. game_stages
-게임 내 스테이지 정보를 저장합니다. 각 스테이지는 월드와 지역에 소속되며, 레벨 요구사항과 보스 스테이지 여부를 정의합니다.
-
-- `id`: 스테이지 식별자
-- `name`: 스테이지 이름
-- `description`: 스테이지 설명
-- `level_requirement`: 입장에 필요한 최소 레벨
-- `stage_order`: 스테이지 순서
-- `world_id`: 소속 월드 ID
-- `region_id`: 소속 지역 ID
-- `is_boss_stage`: 보스 스테이지 여부
-
-#### 2. game_monsters
-게임 내 몬스터 정보를 저장합니다. 각 몬스터는 특정 스테이지에 소속되며, 레벨, HP, 공격력, 방어력, 경험치, 골드 등의 기본 속성을 갖습니다.
-
-- `id`: 몬스터 식별자
-- `name`: 몬스터 이름
-- `description`: 몬스터 설명
-- `level`: 몬스터 레벨
-- `max_hp`: 최대 체력
-- `attack`: 공격력
-- `defense`: 방어력
-- `exp`: 처치 시 획득 경험치
-- `gold`: 처치 시 획득 골드
-- `stage_id`: 소속 스테이지 ID
-- `is_boss`: 보스 몬스터 여부
-- `drop_table_id`: 아이템 드랍 테이블 참조 (향후 확장)
-
-### 전투 시스템 함수 설명
-
-#### 1. gain_experience
-몬스터 처치 후 캐릭터의 경험치와 골드를 증가시키는 함수입니다. 다음 기능을 수행합니다:
-
-- 캐릭터의 현재 레벨과 경험치 조회
-- 경험치와 골드 증가 처리
-- 레벨업 조건 충족 시 레벨 증가 및 스탯 상승
-- 스킬 포인트 부여
-- 여러 레벨 동시 상승 처리 (루프 사용)
+### 3. create_new_character
+새 캐릭터를 생성하는 함수입니다.
+- **매개변수**:
+  - `p_user_id`: 사용자 ID
+  - `p_job_id`: 직업 ID
+- **동작**:
+  - 직업 정보 조회
+  - 직업 기반 초기 스탯 설정
+  - 사용자 ID 연결
+  - 생성된 캐릭터 ID 반환

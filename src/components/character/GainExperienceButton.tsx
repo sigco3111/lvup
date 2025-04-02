@@ -15,9 +15,10 @@ import { useRouter } from 'next/navigation';
 
 interface GainExperienceButtonProps {
   currentLevel: number;
+  onExperienceGained?: () => void; // 경험치 획득 후 호출될 콜백 함수
 }
 
-export function GainExperienceButton({ currentLevel }: GainExperienceButtonProps) {
+export function GainExperienceButton({ currentLevel, onExperienceGained }: GainExperienceButtonProps) {
   const [expAmount, setExpAmount] = useState(100);
   const [isLoading, setIsLoading] = useState(false);
   const [showLevelUp, setShowLevelUp] = useState(false);
@@ -58,6 +59,11 @@ export function GainExperienceButton({ currentLevel }: GainExperienceButtonProps
         
         // 페이지 새로고침 (상태 업데이트)
         router.refresh();
+        
+        // 콜백 함수 호출
+        if (onExperienceGained) {
+          onExperienceGained();
+        }
       } else {
         addNotification(result.message, 'error');
       }

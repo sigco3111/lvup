@@ -15,15 +15,24 @@ type NotificationType = 'success' | 'error' | 'info' | 'warning';
 // 알림 아이템 타입
 interface NotificationItem {
   id: string;
+  title?: string;
   message: string;
   type: NotificationType;
+  duration?: number;
+}
+
+// 알림 파라미터 타입
+interface NotificationParams {
+  message: string;
+  title?: string;
+  type?: NotificationType;
   duration?: number;
 }
 
 // 알림 컨텍스트 타입
 interface NotificationContextType {
   notifications: NotificationItem[];
-  addNotification: (message: string, type?: NotificationType, duration?: number) => void;
+  addNotification: (messageOrParams: string | NotificationParams, type?: NotificationType, duration?: number) => void;
   removeNotification: (id: string) => void;
 }
 
@@ -46,18 +55,36 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   
   // 알림 추가 함수
   const addNotification = (
-    message: string, 
+    messageOrParams: string | NotificationParams, 
     type: NotificationType = 'info', 
     duration: number = 5000
   ) => {
     const id = Date.now().toString();
-    setNotifications(prev => [...prev, { id, message, type, duration }]);
+    
+    // 문자열 메시지 또는 객체 파라미터 처리
+    if (typeof messageOrParams === 'string') {
+      setNotifications(prev => [...prev, { id, message: messageOrParams, type, duration }]);
+    } else {
+      const params = messageOrParams;
+      setNotifications(prev => [...prev, { 
+        id, 
+        title: params.title,
+        message: params.message, 
+        type: params.type || type, 
+        duration: params.duration !== undefined ? params.duration : duration 
+      }]);
+    }
     
     // 지정된 시간 후 자동 제거
-    if (duration > 0) {
+    if ((typeof messageOrParams === 'string' && duration > 0) || 
+        (typeof messageOrParams === 'object' && 
+         (messageOrParams.duration === undefined || messageOrParams.duration > 0))) {
+      const actualDuration = typeof messageOrParams === 'object' && 
+                            messageOrParams.duration !== undefined ? 
+                            messageOrParams.duration : duration;
       setTimeout(() => {
         removeNotification(id);
-      }, duration);
+      }, actualDuration);
     }
   };
   
@@ -122,9 +149,14 @@ function Toast({
       className={`${typeStyles[notification.type]} text-white rounded-lg shadow-lg p-4 min-w-[200px] max-w-[300px] animate-slide-in`}
     >
       <div className="flex items-start justify-between">
-        <div className="flex items-center">
-          <span className="mr-2 font-bold">{typeIcons[notification.type]}</span>
-          <p>{notification.message}</p>
+        <div className="flex flex-col">
+          {notification.title && (
+            <p className="font-bold">{notification.title}</p>
+          )}
+          <div className="flex items-center">
+            <span className="mr-2 font-bold">{typeIcons[notification.type]}</span>
+            <p>{notification.message}</p>
+          </div>
         </div>
         <button onClick={onClose} className="text-white ml-2">×</button>
       </div>

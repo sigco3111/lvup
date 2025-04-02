@@ -11,7 +11,8 @@ export async function middleware(req: NextRequest) {
   
   try {
     // Supabase 미들웨어 클라이언트 생성
-    // Next.js 15에서는 req/res 방식만 사용하도록 cookies 객체를 전달하지 않음
+    // 중요: Next.js 15에서는 cookies() 함수가 비동기이므로
+    // req/res 방식만 사용하도록 설정
     const supabase = createMiddlewareClient({ req, res })
     
     // 세션 새로고침

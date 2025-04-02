@@ -9,9 +9,9 @@ import { createClient } from '@/utils/supabase/server'
  * 게임의 주요 특징과 장점을 소개하는 메인 페이지
  */
 export default async function Home() {
-  // 서버 컴포넌트에서 세션 확인
+  // 서버 컴포넌트에서 사용자 확인 (getUser 사용)
   const supabase = await createClient();
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { user } } = await supabase.auth.getUser();
   
   return (
     <div>
@@ -26,8 +26,8 @@ export default async function Home() {
           </p>
           <div className="flex flex-col sm:flex-row gap-4">
             <Button asChild size="lg">
-              <Link href={session ? "/dashboard" : "/login"}>
-                {session ? "게임 계속하기" : "지금 바로 시작하기"}
+              <Link href={user ? "/dashboard" : "/login"}>
+                {user ? "게임 계속하기" : "지금 바로 시작하기"}
               </Link>
             </Button>
             <Button variant="outline" size="lg" asChild>
@@ -108,8 +108,8 @@ export default async function Home() {
             게임을 켜두는 것만으로도 지속적인 성장이 가능한 LVUP의 세계로 초대합니다.
           </p>
           <Button size="lg" asChild>
-            <Link href={session ? "/dashboard" : "/login"}>
-              {session ? "게임 계속하기" : "무료로 시작하기"}
+            <Link href={user ? "/dashboard" : "/login"}>
+              {user ? "게임 계속하기" : "무료로 시작하기"}
             </Link>
           </Button>
         </div>

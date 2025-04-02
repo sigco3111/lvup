@@ -11,11 +11,11 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 // 로그 아이템 타입 정의
 export interface LogItem {
   id: string; // 고유 ID (타임스탬프 등)
-  type: 'gold' | 'exp' | 'item'; // 로그 타입
+  type: 'gold' | 'exp' | 'item' | 'battle'; // 로그 타입 (battle 추가)
   message: string; // 표시할 메시지
   value?: number; // 골드, 경험치 등의 값
   itemRarity?: 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic'; // 아이템 등급
-  timestamp: number; // 로그 생성 시간
+  timestamp: number | Date; // 로그 생성 시간 (Date 객체 지원 추가)
 }
 
 interface BattleLogProps {
@@ -61,13 +61,19 @@ export function BattleLog({
       case 'gold': return '💰';
       case 'exp': return '✨';
       case 'item': return '🎁';
+      case 'battle': return '⚔️';
       default: return '📝';
     }
   };
   
   // 최신 로그를 위로 표시하기 위해 배열 복사 및 정렬
   const displayLogs = [...logs]
-    .sort((a, b) => b.timestamp - a.timestamp) // 최신 순으로 정렬
+    .sort((a, b) => {
+      // timestamp가 Date 객체인 경우 처리
+      const timeA = a.timestamp instanceof Date ? a.timestamp.getTime() : a.timestamp;
+      const timeB = b.timestamp instanceof Date ? b.timestamp.getTime() : b.timestamp;
+      return timeB - timeA; // 최신 순으로 정렬
+    })
     .slice(0, maxLogCount); // 최대 표시 수 제한
   
   return (
@@ -88,7 +94,7 @@ export function BattleLog({
                   {log.message}
                 </span>
                 <div className="text-gray-400 text-[10px]">
-                  {new Date(log.timestamp).toLocaleTimeString()}
+                  {new Date(log.timestamp instanceof Date ? log.timestamp.getTime() : log.timestamp).toLocaleTimeString()}
                 </div>
               </div>
             </div>

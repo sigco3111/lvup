@@ -13,12 +13,12 @@ export const metadata: Metadata = {
  * 이미 로그인된 사용자는 대시보드로 리디렉션
  */
 export default async function LoginPage() {
-  // 서버 컴포넌트에서 세션 확인
+  // 서버 컴포넌트에서 사용자 확인 (getUser 사용)
   const supabase = await createClient();
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { user } } = await supabase.auth.getUser();
   
   // 이미 로그인된 사용자는 대시보드로 리디렉션
-  if (session) {
+  if (user) {
     redirect('/dashboard');
   }
   

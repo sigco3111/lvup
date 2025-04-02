@@ -8,9 +8,9 @@ import { Button } from "@/components/ui/button";
  * 로고와 기본 네비게이션 링크를 표시
  */
 export default async function Header() {
-  // 서버 컴포넌트에서 세션 확인
+  // 서버 컴포넌트에서 사용자 확인 (getUser 사용)
   const supabase = await createClient();
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { user } } = await supabase.auth.getUser();
   
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
@@ -43,7 +43,7 @@ export default async function Header() {
             소개
           </Link>
           
-          {session ? (
+          {user ? (
             <>
               <Link 
                 href="/dashboard" 
