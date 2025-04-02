@@ -14,6 +14,7 @@ import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import BossChallengeButton from './BossChallengeButton';
 import { useStage } from './StageContext';
+import { useNotification } from '@/components/common/Notifications';
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
 
@@ -30,9 +31,13 @@ export default function StageCard({ className, forceRefresh = false, onBossChall
   
   // 새로고침 키 상태
   const [refreshKey, setRefreshKey] = useState(0);
+  const [localLoading, setLocalLoading] = useState(true);
   
   // 새로고침 시간 추적용 ref
   const lastRefreshTime = useRef(Date.now());
+  
+  // 알림 컨텍스트 가져오기
+  const { addNotification } = useNotification();
   
   // 강제 새로고침 감지
   useEffect(() => {
@@ -44,7 +49,33 @@ export default function StageCard({ className, forceRefresh = false, onBossChall
   
   // 초기 마운트 시 및 새로고침 키 변경 시 데이터 로드
   useEffect(() => {
-    fetchStageData();
+    async function loadStageData() {
+      console.log('스테이지 카드: 데이터 로딩 시작');
+      setLocalLoading(true);
+      
+      try {
+        if (fetchStageData && typeof fetchStageData === 'function') {
+          const success = await fetchStageData();
+          if (!success) {
+            console.error('스테이지 카드: 데이터 로드 실패');
+            addNotification?.({
+              title: '데이터 로드 실패',
+              message: '스테이지 정보를 불러오는데 실패했습니다. 잠시 후 다시 시도해주세요.',
+              type: 'error'
+            });
+          }
+        } else {
+          console.error('스테이지 카드: fetchStageData 함수가 정의되지 않았습니다');
+        }
+      } catch (error) {
+        console.error('스테이지 카드: 데이터 로드 오류', error);
+      } finally {
+        setLocalLoading(false);
+        console.log('스테이지 카드: 데이터 로딩 완료');
+      }
+    }
+    
+    loadStageData();
     
     // 30초마다 자동 새로고침 설정
     const intervalId = setInterval(() => {
@@ -59,10 +90,32 @@ export default function StageCard({ className, forceRefresh = false, onBossChall
   }, [refreshKey, fetchStageData]);
 
   // 새로고침 핸들러
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     lastRefreshTime.current = Date.now();
     console.log('스테이지 데이터 새로고침 요청');
-    fetchStageData();
+    setLocalLoading(true);
+    
+    try {
+      // fetchStageData 함수가 있는지 확인하고 호출
+      if (fetchStageData && typeof fetchStageData === 'function') {
+        const success = await fetchStageData();
+        if (!success) {
+          console.error('스테이지 카드: 새로고침 실패');
+          addNotification?.({
+            title: '새로고침 실패',
+            message: '스테이지 정보를 새로고침하는데 실패했습니다. 잠시 후 다시 시도해주세요.',
+            type: 'error'
+          });
+        }
+      } else {
+        console.error('스테이지 카드: fetchStageData 함수가 정의되지 않았습니다');
+      }
+    } catch (error) {
+      console.error('스테이지 카드: 새로고침 오류', error);
+    } finally {
+      setLocalLoading(false);
+    }
+    
     setRefreshKey(prev => prev + 1);
   };
 
@@ -77,8 +130,8 @@ export default function StageCard({ className, forceRefresh = false, onBossChall
     return Math.min(Math.round((killed / maxMonsters) * 100), 100);
   };
 
-  // 로딩 중 표시
-  if (isLoading) {
+  // 로딩 중 표시 - 컨텍스트의 isLoading과 로컬 로딩 상태 모두 확인
+  if (isLoading || localLoading) {
     return (
       <Card className={cn("w-full", className)}>
         <CardHeader>
@@ -86,7 +139,7 @@ export default function StageCard({ className, forceRefresh = false, onBossChall
           <CardDescription>스테이지 정보를 불러오는 중입니다.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Progress value={0} />
+          <Progress value={20} className="animate-pulse" />
         </CardContent>
       </Card>
     );

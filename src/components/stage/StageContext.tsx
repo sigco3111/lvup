@@ -19,7 +19,7 @@ interface StageContextType {
   isLoading: boolean;
   
   // 액션
-  fetchStageData: () => Promise<void>;
+  fetchStageData: () => Promise<boolean>;
   incrementKilledMonsterCount: () => void;
   setBossBattleState: (isBossBattle: boolean) => void;
   completeStage: (isBossClear: boolean) => Promise<ClearStageResult>;
@@ -37,7 +37,7 @@ const defaultContext: StageContextType = {
   },
   isLoading: true,
   
-  fetchStageData: async () => {},
+  fetchStageData: async () => false,
   incrementKilledMonsterCount: () => {},
   setBossBattleState: () => {},
   completeStage: async () => ({ success: false, message: '컨텍스트가 초기화되지 않았습니다.' })
@@ -78,19 +78,13 @@ export function StageProvider({
   const fetchStageData = useCallback(async () => {
     try {
       setIsLoading(true);
-      console.log('스테이지 데이터 로드 시작...');
-      
-      // 현재 진행 상황을 저장
-      const prevStageId = stageProgress.currentStageId;
-      const prevKilledMonsterCount = stageProgress.killedMonsterCount;
-      const prevIsBossBattle = stageProgress.isBossBattle;
-      console.log('현재 진행 상황:', { 스테이지ID: prevStageId, 처치몬스터: prevKilledMonsterCount });
+      console.log('StageContext: 스테이지 데이터 로드 시작');
       
       // 사용자 확인
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        setIsLoading(false);
-        return;
+        console.error('StageContext: 사용자 인증 정보 없음');
+        throw new Error('사용자 인증 정보가 없습니다.');
       }
 
       // 현재 스테이지 정보 로드
@@ -98,40 +92,13 @@ export function StageProvider({
         .from('user_game_data')
         .select('current_stage_id')
         .eq('user_id', user.id)
-        .maybeSingle(); // single() 대신 maybeSingle() 사용
+        .maybeSingle();
 
       // 게임 데이터가 없거나 current_stage_id가 없는 경우 기본값 설정
-      let currentStageId = gameData?.current_stage_id;
+      let currentStageId = gameData?.current_stage_id || 1;
       
-      console.log('현재 스테이지 ID:', currentStageId);
+      console.log('StageContext: 현재 스테이지 ID:', currentStageId);
       
-      if (!currentStageId) {
-        try {
-          // 기본 스테이지 ID 가져오기
-          const { data: firstStage } = await supabase
-            .from('game_stages')
-            .select('id')
-            .order('sequence', { ascending: true })
-            .limit(1)
-            .single();
-            
-          currentStageId = firstStage ? firstStage.id : 1; // 기본값 설정 - 숫자 1로 변경
-          console.log('기본 스테이지 ID 설정:', currentStageId);
-          
-          // 새로운 게임 데이터 생성 또는 업데이트
-          await supabase
-            .from('user_game_data')
-            .upsert({
-              user_id: user.id,
-              current_stage_id: currentStageId,
-              updated_at: new Date().toISOString()
-            });
-        } catch (error) {
-          console.error('기본 스테이지 설정 실패:', error);
-          currentStageId = 1; // 최종 기본값 - 숫자 1로 변경
-        }
-      }
-
       // 스테이지 정보 로드
       const { data: stageData, error: stageError } = await supabase
         .from('game_stages')
@@ -140,13 +107,10 @@ export function StageProvider({
         .single();
 
       if (stageError || !stageData) {
-        console.error('스테이지 데이터 로드 실패:', stageError);
-        setIsLoading(false);
-        return;
+        console.error('StageContext: 스테이지 데이터 로드 실패:', stageError);
+        throw new Error('스테이지 데이터를 불러올 수 없습니다.');
       }
       
-      console.log('로드된 스테이지 정보:', stageData);
-
       // 클리어한 스테이지 목록 로드
       const { data: clearedStages } = await supabase
         .from('user_cleared_stages')
@@ -174,23 +138,23 @@ export function StageProvider({
       };
 
       // 스테이지가 변경되었는지 확인
-      const isStageChanged = prevStageId !== currentStageId;
+      const isStageChanged = stageProgress.currentStageId !== currentStageId;
       
       // 스테이지 변경 시 몬스터 카운트 초기화, 그렇지 않으면 유지
-      const newKilledMonsterCount = isStageChanged ? 0 : prevKilledMonsterCount;
+      const newKilledMonsterCount = isStageChanged ? 0 : stageProgress.killedMonsterCount;
       
       const progress: StageProgress = {
         currentStageId: currentStageId,
         killedMonsterCount: newKilledMonsterCount,
         isBossAvailable: newKilledMonsterCount >= mappedStage.requiredMonsterCount,
-        isBossBattle: isStageChanged ? false : prevIsBossBattle,
+        isBossBattle: isStageChanged ? false : stageProgress.isBossBattle,
         isCleared: clearedStages?.some(item => Number(item.stage_id) === currentStageId) || false,
         clearedStages: clearedStages?.map(item => Number(item.stage_id)) || [],
         requiredKillCount: mappedStage.requiredMonsterCount
       };
 
-      console.log('스테이지 데이터 업데이트 완료:', { 
-        스테이지: mappedStage, 
+      console.log('StageContext: 스테이지 데이터 업데이트 완료:', { 
+        스테이지: mappedStage.name, 
         진행상황: progress,
         스테이지변경: isStageChanged 
       });
@@ -200,10 +164,14 @@ export function StageProvider({
         ...prev,
         ...progress
       }));
+
+      return true; // 성공적으로 데이터를 로드했음을 나타냄
     } catch (error) {
-      console.error('스테이지 데이터 로드 실패:', error);
+      console.error('StageContext: 스테이지 데이터 로드 실패:', error);
+      return false; // 데이터 로드 실패를 나타냄
     } finally {
       setIsLoading(false);
+      console.log('StageContext: 스테이지 데이터 로드 완료');
     }
   }, [supabase, stageProgress.currentStageId, stageProgress.killedMonsterCount, stageProgress.isBossBattle]);
 

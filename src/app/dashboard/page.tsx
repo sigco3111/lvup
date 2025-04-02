@@ -74,6 +74,115 @@ export default function Dashboard() {
   // 전투 로그 상태
   const [battleLogs, setBattleLogs] = useState<LogItem[]>([]);
   
+  // 직접 상태 업데이트를 위한 훅 추가
+  const forceRender = useCallback(() => {
+    console.log('UI 강제 갱신 요청');
+    setRefreshKey(prev => prev + 1);
+  }, []);
+
+  // 로그 업데이트 핸들러
+  const handleLogUpdate = useCallback((newLog: LogItem | { id: string; type: 'system'; message: string; timestamp: Date }) => {
+    console.log('로그 추가:', newLog.message);
+    
+    setBattleLogs(prevLogs => {
+      // 새 로그를 추가하고, 최대 50개까지만 유지
+      const updatedLogs = [newLog as LogItem, ...prevLogs];
+      return updatedLogs.slice(0, 50);
+    });
+    
+    // 아이템 획득 시 알림 카운트 증가
+    if (newLog.type === 'item') {
+      setNewItemsCount(prev => prev + 1);
+    }
+  }, []);
+
+  // 골드 값을 직접 업데이트하는 함수
+  const updateGoldDirectly = useCallback((newGold: number) => {
+    console.log(`골드 직접 업데이트: ${gameData.gold} → ${newGold}`);
+    
+    // 로컬 상태 즉시 업데이트
+    setGameData(prev => {
+      const updated = { 
+        ...prev, 
+        gold: newGold
+      };
+      return updated;
+    });
+    
+    // 변경되었음을 표시
+    forceRender();
+  }, [gameData.gold, forceRender]);
+
+  // 경험치 값을 직접 업데이트하는 함수
+  const updateExpDirectly = useCallback((newExp: number) => {
+    console.log(`경험치 직접 업데이트: ${character?.experience || 0} → ${newExp}`);
+    
+    // 로컬 상태 즉시 업데이트
+    setCharacter(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        experience: newExp
+      };
+    });
+    
+    // 변경되었음을 표시
+    forceRender();
+  }, [character, forceRender]);
+
+  // 테스트 골드 추가 버튼 직접 구현
+  const addTestGold = useCallback(async () => {
+    try {
+      const goldToAdd = 100;
+      const currentGold = gameData.gold || 0;
+      const newGold = currentGold + goldToAdd;
+      
+      console.log(`[테스트 골드] 추가: ${currentGold} + ${goldToAdd} = ${newGold}`);
+      
+      // 1. 로컬 상태 즉시 업데이트 
+      updateGoldDirectly(newGold);
+      
+      // 2. 로그 추가
+      handleLogUpdate({
+        id: uuidv4(),
+        type: 'gold' as const,
+        message: `테스트: ${goldToAdd} 골드가 추가되었습니다!`,
+        timestamp: new Date()
+      });
+      
+      // 3. 서버에 저장 (비동기로 백그라운드에서 처리)
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          console.error('사용자 인증 정보 없음');
+          return;
+        }
+        
+        // 사용자 데이터 업데이트
+        const { data, error } = await supabase
+          .from('user_game_data')
+          .update({ gold: newGold })
+          .eq('user_id', user.id);
+        
+        if (error) {
+          console.error('골드 업데이트 오류:', error);
+        } else {
+          console.log('골드 서버 업데이트 성공');
+        }
+      } catch (error) {
+        console.error('서버 통신 오류:', error);
+      }
+    } catch (error) {
+      console.error('골드 추가 처리 오류:', error);
+    }
+  }, [gameData.gold, handleLogUpdate, supabase, updateGoldDirectly]);
+
+  // 골드 변경 핸들러를 단순화하고 직접 UI 업데이트에 집중
+  const goldChangeHandler = useCallback((newGold: number) => {
+    console.log(`골드 변경 감지: ${newGold}`);
+    updateGoldDirectly(newGold);
+  }, [updateGoldDirectly]);
+  
   // 데이터 로드 함수
   const loadDashboardData = useCallback(async () => {
     try {
@@ -176,80 +285,49 @@ export default function Dashboard() {
   useEffect(() => {
     loadDashboardData();
     
-    // 실시간 구독 설정
+    // 실시간 구독 설정 - 단순화
     const userGameDataChannel = supabase
       .channel('user_game_data_changes')
       .on(
         'postgres_changes',
         {
-          event: '*',  // INSERT, UPDATE, DELETE 이벤트 모두 감지
+          event: 'UPDATE',  // 업데이트 이벤트만 구독
           schema: 'public',
           table: 'user_game_data'
         },
         (payload) => {
-          console.log('사용자 게임 데이터 변경 감지:', payload);
+          console.log('실시간 업데이트 감지 (게임 데이터):', payload);
           
-          // 이벤트가 발생한 시간 확인 (너무 오래된 이벤트는 무시)
-          const now = Date.now();
-          if (now - lastUpdateTimeRef.current < 100) {
-            console.log('이미 처리된 이벤트로 판단, 무시');
-            return;
-          }
-          
-          // 골드 값이 변경되었을 때 즉시 업데이트
-          if (payload.eventType === 'UPDATE' && payload.new) {
-            // 먼저 gameData 상태 업데이트 
-            setGameData(prevData => {
-              const newData = { ...prevData };
+          // 새로운 데이터가 있는지 확인
+          if (payload.new) {
+            // 골드 변경 감지
+            if (payload.new.gold !== undefined) {
+              console.log(`골드 변경 감지: ${gameData.gold} → ${payload.new.gold}`);
               
-              // 골드 값이 변경된 경우
-              if (payload.new.gold !== undefined && prevData.gold !== payload.new.gold) {
-                console.log(`골드 값 변경 감지: ${prevData.gold} -> ${payload.new.gold}`);
-                newData.gold = payload.new.gold;
-                
-                // 골드 변경 로그 추가
-                const goldDiff = payload.new.gold - prevData.gold;
-                if (goldDiff > 0) {
-                  handleLogUpdate({
-                    id: Date.now().toString(),
-                    type: 'gold',
-                    message: `${goldDiff} 골드를 획득했습니다!`,
-                    timestamp: new Date()
-                  });
-                }
-              }
+              // 1. 즉시 UI에 반영
+              setGameData(prev => {
+                const updatedData = { ...prev, gold: payload.new.gold };
+                console.log('업데이트된 게임 데이터:', updatedData);
+                return updatedData;
+              });
               
-              // 스테이지 ID가 변경된 경우
-              if (payload.new.current_stage_id !== undefined && 
-                  prevData.current_stage_id !== payload.new.current_stage_id) {
-                console.log(`스테이지 변경 감지: ${prevData.current_stage_id} -> ${payload.new.current_stage_id}`);
-                newData.current_stage_id = payload.new.current_stage_id;
-                
-                // 스테이지 변경 로그 추가
+              // 2. 변경된 경우에만 로그 추가 (증가한 경우)
+              const goldDiff = payload.new.gold - gameData.gold;
+              if (goldDiff > 0) {
                 handleLogUpdate({
-                  id: Date.now().toString(),
-                  type: 'battle',
-                  message: `스테이지가 변경되었습니다!`,
+                  id: uuidv4(),
+                  type: 'gold' as const,
+                  message: `${goldDiff} 골드를 획득했습니다!`,
                   timestamp: new Date()
                 });
-                
-                // 스테이지 변경 시 강제 새로고침 트리거
-                setTimeout(() => {
-                  setIsForceRefresh(true);
-                }, 300);
               }
-              
-              return newData;
-            });
-          } else {
-            // 다른 타입의 이벤트는 전체 데이터 다시 로드
-            loadDashboardData();
+            }
           }
         }
       )
       .subscribe();
       
-    // 캐릭터 데이터 변경 구독
+    // 캐릭터 데이터 변경 구독 - 단순화
     const userCharacterChannel = supabase
       .channel('user_character_changes')
       .on(
@@ -260,116 +338,76 @@ export default function Dashboard() {
           table: 'user_characters'
         },
         (payload) => {
-          console.log('캐릭터 데이터 변경 감지:', payload);
+          console.log('실시간 업데이트 감지 (캐릭터):', payload);
           
-          // 이벤트가 발생한 시간 확인 (너무 오래된 이벤트는 무시)
-          const now = Date.now();
-          if (now - lastUpdateTimeRef.current < 100) {
-            console.log('이미 처리된 이벤트로 판단, 무시');
-            return;
-          }
-          
-          // 경험치 값이 변경되었을 때 즉시 업데이트
-          if (payload.new && payload.new.experience !== undefined) {
-            setCharacter((prev: any) => {
-              if (!prev) return prev;
+          // 새로운 데이터가 있는지 확인
+          if (payload.new) {
+            // 경험치 변경 감지
+            if (payload.new.experience !== undefined && character) {
+              console.log(`경험치 변경 감지: ${character.experience} → ${payload.new.experience}`);
               
-              const newCharacter = { ...prev };
+              // 1. 즉시 UI에 반영
+              setCharacter(prev => {
+                if (!prev) return prev;
+                return { ...prev, experience: payload.new.experience };
+              });
               
-              // 경험치가 변경된 경우
-              if (prev.experience !== payload.new.experience) {
-                console.log(`경험치 변경 감지: ${prev.experience} -> ${payload.new.experience}`);
-                newCharacter.experience = payload.new.experience;
-                
-                // 경험치 변경 로그 추가
-                const expDiff = payload.new.experience - prev.experience;
-                if (expDiff > 0) {
-                  handleLogUpdate({
-                    id: Date.now().toString(),
-                    type: 'exp',
-                    message: `${expDiff} 경험치를 획득했습니다!`,
-                    timestamp: new Date()
-                  });
-                }
+              // 2. 변경된 경우에만 로그 추가 (증가한 경우)
+              const expDiff = payload.new.experience - character.experience;
+              if (expDiff > 0) {
+                handleLogUpdate({
+                  id: uuidv4(),
+                  type: 'exp' as const,
+                  message: `${expDiff} 경험치를 획득했습니다!`,
+                  timestamp: new Date()
+                });
               }
               
-              // 레벨이 변경된 경우
-              if (payload.new.level !== undefined && prev.level !== payload.new.level) {
-                console.log(`레벨 변경 감지: ${prev.level} -> ${payload.new.level}`);
-                newCharacter.level = payload.new.level;
+              // 레벨 변경 감지
+              if (payload.new.level !== undefined && payload.new.level !== character.level) {
+                console.log(`레벨 변경 감지: ${character.level} → ${payload.new.level}`);
                 
-                // 레벨 업 로그 추가
-                if (payload.new.level > prev.level) {
+                // 캐릭터 레벨 업데이트
+                setCharacter(prev => {
+                  if (!prev) return prev;
+                  return { ...prev, level: payload.new.level };
+                });
+                
+                // 레벨업 로그 추가
+                if (payload.new.level > character.level) {
                   handleLogUpdate({
-                    id: Date.now().toString(),
-                    type: 'battle',
-                    message: `레벨 업! Lv.${prev.level} → Lv.${payload.new.level}`,
+                    id: uuidv4(),
+                    type: 'battle' as const,
+                    message: `레벨 업! Lv.${character.level} → Lv.${payload.new.level}`,
                     timestamp: new Date()
                   });
-                }
-                
-                // 레벨 변경 시 다음 레벨 경험치 요구량도 업데이트 필요
-                setTimeout(() => {
+                  
+                  // 다음 레벨 경험치 요구량 업데이트
                   loadDashboardData();
-                }, 1000);
+                }
               }
-              
-              return newCharacter;
-            });
-          } else {
-            // 다른 필드가 변경된 경우 전체 데이터 다시 로드
-            loadDashboardData();
+            }
           }
-        }
-      )
-      .subscribe();
-      
-    // 스테이지 클리어 구독
-    const stageClearChannel = supabase
-      .channel('stage_clear_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'user_cleared_stages'
-        },
-        (payload) => {
-          console.log('스테이지 클리어 감지:', payload);
-          
-          // 스테이지 클리어 로그 추가
-          handleLogUpdate({
-            id: Date.now().toString(),
-            type: 'battle',
-            message: `스테이지를 클리어했습니다!`,
-            timestamp: new Date()
-          });
-          
-          // 스테이지 클리어 시 강제 새로고침 트리거
-          setTimeout(() => {
-            setIsForceRefresh(true);
-          }, 1000);
         }
       )
       .subscribe();
     
-    // 주기적 새로고침 (5초마다)
+    // 주기적 새로고침 간격 변경 (3초마다)
     refreshTimerRef.current = setInterval(() => {
-      console.log('주기적 데이터 동기화');
+      console.log('주기적 데이터 동기화 실행');
       loadDashboardData();
-    }, 5000);
+    }, 3000);
     
     return () => {
       // 구독 및 타이머 정리
       userGameDataChannel.unsubscribe();
       userCharacterChannel.unsubscribe();
-      stageClearChannel.unsubscribe();
       
       if (refreshTimerRef.current) {
         clearInterval(refreshTimerRef.current);
       }
     };
-  }, [loadDashboardData, supabase]);
+  }, [loadDashboardData, supabase, character, gameData.gold]);
   
   // 강제 새로고침 감지 및 처리
   useEffect(() => {
@@ -395,34 +433,6 @@ export default function Dashboard() {
     // 리프레시 키를 증가시켜 컴포넌트 리렌더링 유도
     setRefreshKey(prev => prev + 1);
   };
-  
-  // 골드 변경 처리 핸들러
-  const goldChangeHandler = useCallback((newGold: number) => {
-    console.log('골드 변경 감지:', newGold);
-    
-    // 즉시 UI 업데이트
-    setGameData(prev => ({
-      ...prev,
-      gold: newGold
-    }));
-    
-  }, []);
-  
-  // 로그 업데이트 핸들러
-  const handleLogUpdate = useCallback((newLog: LogItem | { id: string; type: 'system'; message: string; timestamp: Date }) => {
-    console.log('로그 추가:', newLog.message);
-    
-    setBattleLogs(prevLogs => {
-      // 새 로그를 추가하고, 최대 50개까지만 유지
-      const updatedLogs = [newLog as LogItem, ...prevLogs];
-      return updatedLogs.slice(0, 50);
-    });
-    
-    // 아이템 획득 시 알림 카운트 증가
-    if (newLog.type === 'item') {
-      setNewItemsCount(prev => prev + 1);
-    }
-  }, []);
   
   // 로딩 중 화면
   if (isLoading || !character) {
@@ -563,57 +573,12 @@ export default function Dashboard() {
                 }}
               />
               
-              {/* 골드 테스트 버튼 - 개발용 */}
+              {/* 골드 테스트 버튼 코드 교체 */}
               {process.env.NODE_ENV === 'development' && (
                 <Button
                   variant="outline"
                   className="mt-2"
-                  onClick={async () => {
-                    try {
-                      // 현재 골드 값 가져오기
-                      const currentGold = gameData.gold || 0;
-                      const goldToAdd = 100;
-                      const newGold = currentGold + goldToAdd;
-                      
-                      // 1. 즉시 UI 업데이트
-                      setGameData(prev => ({
-                        ...prev,
-                        gold: newGold
-                      }));
-                      
-                      // 2. 로그 업데이트
-                      handleLogUpdate({
-                        id: uuidv4(),
-                        type: 'gold',
-                        message: `테스트: ${goldToAdd} 골드가 추가되었습니다!`,
-                        timestamp: new Date()
-                      });
-                      
-                      // 3. 서버에 저장 (백그라운드에서 비동기로 처리)
-                      (async () => {
-                        try {
-                          const { data: { user } } = await supabase.auth.getUser();
-                          if (!user) return;
-                          
-                          const { data, error } = await supabase
-                            .from('user_game_data')
-                            .update({ gold: newGold })
-                            .eq('user_id', user.id);
-                          
-                          if (error) {
-                            console.error('골드 업데이트 오류:', error);
-                            return;
-                          }
-                          
-                          console.log('골드 업데이트 성공:', newGold);
-                        } catch (err) {
-                          console.error('골드 업데이트 중 예외 발생:', err);
-                        }
-                      })();
-                    } catch (error) {
-                      console.error('골드 추가 오류:', error);
-                    }
-                  }}
+                  onClick={addTestGold}
                 >
                   골드 +100 추가 (테스트)
                 </Button>

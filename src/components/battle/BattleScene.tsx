@@ -72,11 +72,13 @@ export default function BattleScene({ onLogUpdate, onGoldChange, onExperienceGai
   useEffect(() => {
     async function loadCharacterData() {
       try {
+        console.log('BattleScene: 캐릭터 데이터 로드 시작');
         // 사용자 인증 정보 가져오기 (getUser 사용)
         const { data: { user }, error: authError } = await supabase.auth.getUser();
         
         if (authError || !user) {
           console.error('사용자 인증 오류:', authError);
+          setIsDataLoaded(true); // 오류가 발생해도 로딩 상태 종료
           return;
         }
 
@@ -87,7 +89,11 @@ export default function BattleScene({ onLogUpdate, onGoldChange, onExperienceGai
           .eq('user_id', user.id)
           .single();
 
-        if (error) throw error;
+        if (error) {
+          console.error('캐릭터 데이터 로드 오류:', error);
+          setIsDataLoaded(true); // 오류가 발생해도 로딩 상태 종료
+          return;
+        }
 
         // 게임 데이터(골드 등) 로드
         const { data: gameData, error: gameDataError } = await supabase
@@ -154,17 +160,28 @@ export default function BattleScene({ onLogUpdate, onGoldChange, onExperienceGai
             defense: Number(characterData.physical_defense || characterData.defense),
             attackSpeed: Number(characterData.attack_speed || 1),
           });
-          
-          // 데이터 로드 완료 플래그 설정
-          setIsDataLoaded(true);
         }
+        
+        console.log('BattleScene: 캐릭터 및 게임 데이터 로드 완료');
       } catch (error) {
         console.error('캐릭터 데이터 로드 실패:', error);
+      } finally {
+        // 데이터 로드 완료 플래그 설정 - 항상 로딩 상태 종료
+        setIsDataLoaded(true);
+        console.log('BattleScene: 데이터 로딩 상태 종료');
       }
     }
 
     loadCharacterData();
-  }, [onGoldChange]);
+  }, [onGoldChange, supabase]);
+
+  // 몬스터 생성 함수는 isDataLoaded가 true일 때만 호출되도록 개선
+  useEffect(() => {
+    if (isDataLoaded && character) {
+      console.log('BattleScene: 데이터 로드 완료, 몬스터 생성 시작');
+      spawnMonster();
+    }
+  }, [isDataLoaded, character]);
 
   // 몬스터 생성 함수
   const spawnMonster = async () => {
@@ -469,152 +486,126 @@ export default function BattleScene({ onLogUpdate, onGoldChange, onExperienceGai
     }
   };
 
-  // 몬스터 처치 처리 함수 완전히 재작성
+  // 몬스터 처치 함수 수정
   const handleMonsterDefeat = async () => {
     if (!character || !battleState.currentMonster) return;
     
-    const { currentMonster } = battleState;
-    
-    // 현재 골드 값 가져오기
-    const currentGold = gameData.gold || 0;
-    
-    // 획득한 골드, 경험치 계산
-    const goldGained = currentMonster.gold;
-    const expGained = currentMonster.exp;
-    
-    // 새로운 골드 값 계산
-    const newGold = currentGold + goldGained;
-    
-    // 1. 즉시 UI 업데이트
-    // ----------------
-    // 골드 UI 즉시 업데이트
-    setGameData(prev => ({ ...prev, gold: newGold }));
-    
-    // 2. 로그 메시지 추가
-    // ----------------
-    if (onLogUpdate) {
-      // 몬스터 처치 로그
-      onLogUpdate({
-        id: uuidv4(),
-        type: 'battle',
-        message: `${currentMonster.name}을(를) 처치했습니다!`,
-        timestamp: new Date()
+    try {
+      const { currentMonster } = battleState;
+      
+      // 획득한 골드, 경험치 계산
+      const goldGained = currentMonster.gold;
+      const expGained = currentMonster.exp;
+      
+      // 현재 골드 값 가져오기
+      const currentGold = gameData.gold || 0;
+      
+      // 새로운 골드 값 계산
+      const newGold = currentGold + goldGained;
+      
+      console.log('[몬스터 처치]', { 
+        몬스터: currentMonster.name, 
+        획득골드: goldGained, 
+        현재골드: currentGold,
+        새골드: newGold 
       });
       
-      // 골드 획득 로그
-      onLogUpdate({
-        id: uuidv4(),
-        type: 'gold',
-        message: `${goldGained} 골드를 획득했습니다!`,
-        timestamp: new Date()
-      });
+      // 1. 즉시 UI 업데이트
+      // 직접 gameData 업데이트
+      setGameData(prev => ({
+        ...prev,
+        gold: newGold
+      }));
       
-      // 경험치 획득 로그
-      onLogUpdate({
-        id: uuidv4(),
-        type: 'exp',
-        message: `${expGained} 경험치를 획득했습니다!`,
-        timestamp: new Date()
-      });
-    }
-    
-    // 3. 부모 컴포넌트에 변경 알림
-    // -----------------------
-    // 골드 변경 알림 (부모 컴포넌트)
-    if (onGoldChange) {
-      onGoldChange(newGold);
-    }
-    
-    // 4. 서버에 저장 요청 (비동기)
-    // -----------------------
-    // 서버에 데이터 저장 (비동기로 백그라운드에서 진행)
-    const savePromise = (async () => {
-      try {
-        // 아이템 드롭 처리
-        let droppedItem = null;
-        const itemDropped = Math.random() < (currentMonster.itemDropChance || 0.05);
-        
-        if (itemDropped) {
-          // 아이템 로드 및 처리 로직...
-          const { data: itemsData } = await supabase
-            .from('game_items')
-            .select('*')
-            .lte('required_level', character.level)
-            .limit(10);
-            
-          if (itemsData && itemsData.length > 0) {
-            const randomItemIndex = Math.floor(Math.random() * itemsData.length);
-            const selectedItem = itemsData[randomItemIndex];
-            
-            droppedItem = {
-              itemId: selectedItem.id,
-              quantity: 1
-            };
-            
-            // 아이템 획득 로그
-            if (onLogUpdate) {
-              onLogUpdate({
-                id: uuidv4(),
-                type: 'battle',
-                message: `${selectedItem.name}을(를) 획득했습니다!`,
-                timestamp: new Date()
-              });
-            }
-          }
-        }
-        
-        // 서버에 전송할 데이터 구성
-        const lootData: LootData = {
-          gold: goldGained,
-          exp: expGained,
-          items: droppedItem ? [droppedItem] : undefined
-        };
-        
-        // 서버에 저장 요청
-        await recordLoot(lootData);
-        
-        console.log('전투 보상 서버 저장 완료');
-      } catch (error) {
-        console.error('전투 보상 서버 저장 실패:', error);
+      // 2. 부모 컴포넌트에 알림 (이중 보장)
+      if (onGoldChange) {
+        console.log('[골드 변경 직접 호출]', newGold);
+        onGoldChange(newGold);
       }
-    })();
-    
-    // 5. 무시해도 되는 비동기 작업 - 진행 중에 계속 진행
-    
-    // 보스 몬스터 처리
-    const isBoss = currentStage?.isBossStage && stageProgress.isBossBattle;
-    if (isBoss) {
-      // 보스 전투 모드 종료
-      setBossBattleState(false);
       
-      // 보스 처치 로그 추가
+      // 3. 로그 메시지
       if (onLogUpdate) {
+        // 몬스터 처치 로그
         onLogUpdate({
           id: uuidv4(),
           type: 'battle',
-          message: `🏆 보스 ${currentMonster.name}을(를) 처치했습니다! 🏆`,
+          message: `${currentMonster.name}을(를) 처치했습니다!`,
+          timestamp: new Date()
+        });
+        
+        // 골드 획득 로그
+        onLogUpdate({
+          id: uuidv4(),
+          type: 'gold',
+          message: `${goldGained} 골드를 획득했습니다!`,
+          timestamp: new Date()
+        });
+        
+        // 경험치 획득 로그
+        onLogUpdate({
+          id: uuidv4(),
+          type: 'exp',
+          message: `${expGained} 경험치를 획득했습니다!`,
           timestamp: new Date()
         });
       }
-    } else {
-      // 일반 몬스터인 경우 스테이지 진행도 업데이트
-      incrementKilledMonsterCount();
+      
+      // 4. 스테이지 처리
+      const isBoss = currentStage?.isBossStage && stageProgress.isBossBattle;
+      if (isBoss) {
+        // 보스 전투 모드 종료
+        setBossBattleState(false);
+        
+        // 보스 처치 로그 추가
+        if (onLogUpdate) {
+          onLogUpdate({
+            id: uuidv4(),
+            type: 'battle',
+            message: `🏆 보스 ${currentMonster.name}을(를) 처치했습니다! 🏆`,
+            timestamp: new Date()
+          });
+        }
+      } else {
+        // 일반 몬스터인 경우 스테이지 진행도 업데이트
+        incrementKilledMonsterCount();
+      }
+      
+      // 5. 전투 상태 초기화
+      setBattleState(prev => ({
+        ...prev,
+        isInBattle: false,
+        currentMonster: null,
+        lastDamageDealt: null,
+        lastDamageReceived: null,
+      }));
+      
+      // 6. 서버 저장 (백그라운드 처리로 분리)
+      setTimeout(() => {
+        try {
+          // lootData 구성
+          const lootData: LootData = {
+            gold: goldGained,
+            exp: expGained,
+            items: [] // 간소화
+          };
+          
+          // 서버 저장 - 비동기로 별도 처리
+          recordLoot(lootData)
+            .then(() => console.log('서버 보상 저장 완료'))
+            .catch(err => console.error('서버 보상 저장 실패:', err));
+        } catch (error) {
+          console.error('보상 처리 오류:', error);
+        }
+      }, 0); // 다음 이벤트 루프에서 처리
+      
+      // 7. 새 몬스터 생성 (짧은 지연 후)
+      await new Promise(resolve => setTimeout(resolve, 300));
+      spawnMonster();
+      
+    } catch (error) {
+      console.error('몬스터 처치 처리 오류:', error);
+      spawnMonster(); // 오류가 있어도 새 몬스터 생성
     }
-    
-    // 전투 상태 초기화
-    setBattleState(prev => ({
-      ...prev,
-      isInBattle: false,
-      currentMonster: null,
-      lastDamageDealt: null,
-      lastDamageReceived: null,
-    }));
-    
-    // 몬스터 처치 후 약간의 지연시간 (1초)
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // 새 몬스터 생성
-    spawnMonster();
   };
 
   // 캐릭터 사망 처리 (현재는 즉시 부활)
